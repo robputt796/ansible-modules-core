@@ -63,9 +63,13 @@ options:
         If C(touch) (new in 1.4), an empty file will be created if the C(path) does not
         exist, while an existing file or directory will receive updated file access and
         modification times (similar to the way `touch` works from the command line).
+        If C(empty) (new in 2.1), an existing file will be truncated with a new size of 0.
+        if C(empty), an existing directory will have all files and subdirs recursively removed,
+        leaving the directory empty. If C(empty), absent files or directories are not
+        created.
     required: false
     default: file
-    choices: [ file, link, directory, hard, touch, absent ]
+    choices: [ file, link, directory, hard, touch, absent, empty ]
   src:
     required: false
     default: null
