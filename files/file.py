@@ -63,9 +63,13 @@ options:
         If C(touch) (new in 1.4), an empty file will be created if the C(path) does not
         exist, while an existing file or directory will receive updated file access and
         modification times (similar to the way `touch` works from the command line).
+        If C(empty) (new in 2.1), an existing file will be truncated with a new size of 0.
+        if C(empty), an existing directory will have all files and subdirs recursively removed,
+        leaving the directory empty. If C(empty), absent files or directories are not
+        created.
     required: false
     default: file
-    choices: [ file, link, directory, hard, touch, absent ]
+    choices: [ file, link, directory, hard, touch, absent, empty ]
   src:
     required: false
     default: null
@@ -159,7 +163,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec = dict(
-            state = dict(choices=['file','directory','link','hard','touch','absent'], default=None),
+            state = dict(choices=['file','directory','link','hard','touch','absent','empty'], default=None),
             path  = dict(aliases=['dest', 'name'], required=True),
             original_basename = dict(required=False), # Internal use only, for recursive ops
             recurse  = dict(default=False, type='bool'),
@@ -427,6 +431,47 @@ def main():
                 raise e
 
         module.exit_json(dest=path, changed=True, diff=diff)
+
+    elif state == "empty":
+        # NOTE(robputt796): Initial response to https://github.com/ansible/ansible-modules-core/issues/902
+        # Allows truncate of file, or removal of sub files for a directory for empty state.
+        if not module.check_mode:
+            # Empty state can only be used against a file (to truncate) or directory (to empty)
+            if prev_state in ['file', 'directory']:
+                changed = False
+                try:
+                    if prev_state == 'file':
+                        if os.stat(path).st_size != 0:
+                            # File not empty, truncate.
+                            try:
+                                file = open(path, 'w')
+                                file.truncate(0)
+                                changed = True
+                                file.close()
+                            except IOError, e:
+                                module.fail_json(path=path,
+                                                 msg='There was an issue ensuring %s is empty: %s' % (path, str(e)))
+
+                    if prev_state == 'directory':
+                        file_listing = os.listdir(path)
+                        if file_listing != []:
+                            # Directory is not empty, emptying
+                            changed = True
+                            for file_name in file_listing:
+                                full_path = "%s/%s" % (path, file_name)
+                                if os.path.isdir(full_path):
+                                    shutil.rmtree(full_path)
+                                else:
+                                    os.remove(full_path)
+
+                except OSError, e:
+                    module.fail_json(path=path, msg='There was an issue ensuring %s is empty: %s' % (path, str(e)))
+
+                module.exit_json(dest=path, changed=changed, diff=diff)
+
+            # Fail for any other state then file / directory
+            elif prev_state in ['absent', 'hard', 'link']:
+                module.fail_json(msg='Cannot ensure %s is empty as it\'s current state is %s' % (path, prev_state))
 
     module.fail_json(path=path, msg='unexpected position reached')
 
